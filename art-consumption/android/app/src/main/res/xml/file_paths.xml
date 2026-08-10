@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-path name="art_content" path="ArtConsumption/" />
+    <files-path name="internal_content" path="content/" />
+</paths>
