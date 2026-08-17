@@ -86,10 +86,10 @@ class ArtWidgetProvider : AppWidgetProvider() {
 
             val openIntent = CarouselActivity.intent(context, post.shortcode)
             val pendingOpen = PendingIntent.getActivity(
-                context, post.shortcode.hashCode(), openIntent,
+                context, widgetId, openIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            views.setOnClickPendingIntent(R.id.widget_image, pendingOpen)
+            views.setOnClickPendingIntent(R.id.widget_root, pendingOpen)
 
             manager.updateAppWidget(widgetId, views)
         }
