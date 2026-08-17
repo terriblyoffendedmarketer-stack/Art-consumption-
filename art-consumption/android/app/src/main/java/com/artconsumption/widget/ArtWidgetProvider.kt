@@ -63,20 +63,32 @@ class ArtWidgetProvider : AppWidgetProvider() {
 
             val views = RemoteViews(context.packageName, R.layout.widget_art)
 
-            val bitmap = sync.downloadFirstSlideAsBitmap(post)
+            val bitmap = sync.downloadLastSlideAsBitmap(post)
             if (bitmap != null) {
                 views.setImageViewBitmap(R.id.widget_image, bitmap)
             }
 
             val captionLines = post.caption.lines()
                 .map { it.trim() }
-                .filter { it.isNotEmpty() && !it.startsWith("http") }
+                .filter { line ->
+                    line.isNotEmpty() &&
+                    !line.startsWith("http") &&
+                    !line.startsWith("#")
+                }
 
-            val title = captionLines.getOrNull(0) ?: ""
-            val artist = captionLines.getOrNull(1) ?: "@${post.handle}"
+            val hook = extractHook(captionLines)
+            val truncated = if (hook.length > 150) hook.take(147) + "..." else hook
 
-            views.setTextViewText(R.id.widget_title, title)
-            views.setTextViewText(R.id.widget_subtitle, artist)
+            val paintingName = captionLines.getOrNull(0) ?: ""
+            val artist = captionLines.getOrNull(1) ?: ""
+            val subtitle = if (artist.startsWith("By ", ignoreCase = true)) {
+                "$paintingName • $artist"
+            } else {
+                paintingName
+            }
+
+            views.setTextViewText(R.id.widget_title, truncated)
+            views.setTextViewText(R.id.widget_subtitle, subtitle)
 
             if (post.slideCount > 1) {
                 views.setTextViewText(R.id.widget_slide_count, "${post.slideCount} slides")
@@ -93,6 +105,19 @@ class ArtWidgetProvider : AppWidgetProvider() {
 
             manager.updateAppWidget(widgetId, views)
         }
+    }
+
+    private fun extractHook(lines: List<String>): String {
+        for (line in lines) {
+            val lower = line.lowercase()
+            if (line.length <= 40) continue
+            if (lower.startsWith("by ")) continue
+            if (lower.contains("now i understand")) continue
+            if (line.startsWith("📍")) continue
+            if (lower.matches("^.+\\(\\d{4}\\)$".toRegex())) continue
+            return line
+        }
+        return lines.firstOrNull() ?: ""
     }
 
     companion object {

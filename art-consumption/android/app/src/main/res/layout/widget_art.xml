@@ -1,59 +1,71 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     android:background="@color/black">
 
-    <ImageView
-        android:id="@+id/widget_image"
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:scaleType="fitCenter"
-        android:contentDescription="@null" />
+        android:layout_height="0dp"
+        android:layout_weight="3">
+
+        <ImageView
+            android:id="@+id/widget_image"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="fitCenter"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/widget_slide_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:padding="8dp"
+            android:textColor="@color/white"
+            android:textSize="10sp"
+            android:shadowColor="@color/black"
+            android:shadowDx="1"
+            android:shadowDy="1"
+            android:shadowRadius="3"
+            android:alpha="0.7" />
+
+    </FrameLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:orientation="vertical"
-        android:background="#CC000000"
-        android:padding="10dp">
+        android:background="#E6111111"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:gravity="center_vertical">
 
         <TextView
             android:id="@+id/widget_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="@color/white"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:maxLines="2"
+            android:textColor="#EEFFFFFF"
+            android:textSize="12sp"
+            android:lineSpacingExtra="2dp"
+            android:maxLines="4"
             android:ellipsize="end" />
 
         <TextView
             android:id="@+id/widget_subtitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#B3FFFFFF"
-            android:textSize="11sp"
+            android:textColor="#80FFFFFF"
+            android:textSize="10sp"
             android:maxLines="1"
             android:ellipsize="end"
-            android:paddingTop="2dp" />
+            android:paddingTop="4dp" />
 
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/widget_slide_count"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:padding="8dp"
-        android:textColor="@color/white"
-        android:textSize="10sp"
-        android:shadowColor="@color/black"
-        android:shadowDx="1"
-        android:shadowDy="1"
-        android:shadowRadius="3"
-        android:alpha="0.7" />
-
-</FrameLayout>
+</LinearLayout>

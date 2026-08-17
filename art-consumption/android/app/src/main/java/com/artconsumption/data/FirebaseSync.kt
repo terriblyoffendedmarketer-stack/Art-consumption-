@@ -84,21 +84,31 @@ class FirebaseSync(private val context: Context) {
     }
 
     suspend fun downloadFirstSlideAsBitmap(post: ArtPost): Bitmap? {
-        val cached = getCachedFirstSlide(post)
-        if (cached != null) {
-            return decodeSampledBitmap(cached, 800, 800)
-        }
+        return downloadSlideAsBitmap(post, 0)
+    }
 
+    suspend fun downloadLastSlideAsBitmap(post: ArtPost): Bitmap? {
         if (post.slideBlobs.isEmpty()) return null
         val blobs = JSONArray(post.slideBlobs)
         if (blobs.length() == 0) return null
+        return downloadSlideAsBitmap(post, blobs.length() - 1)
+    }
 
-        val firstBlob = blobs.getString(0)
+    private suspend fun downloadSlideAsBitmap(post: ArtPost, index: Int): Bitmap? {
+        if (post.slideBlobs.isEmpty()) return null
+        val blobs = JSONArray(post.slideBlobs)
+        if (index < 0 || index >= blobs.length()) return null
+
+        val blobPath = blobs.getString(index)
         val destDir = File(post.directoryPath)
         destDir.mkdirs()
-        val destFile = File(destDir, firstBlob.substringAfterLast("/"))
+        val destFile = File(destDir, blobPath.substringAfterLast("/"))
 
-        if (downloadFile(firebaseUrl(firstBlob), destFile)) {
+        if (destFile.exists()) {
+            return decodeSampledBitmap(destFile, 800, 800)
+        }
+
+        if (downloadFile(firebaseUrl(blobPath), destFile)) {
             return decodeSampledBitmap(destFile, 800, 800)
         }
         return null
