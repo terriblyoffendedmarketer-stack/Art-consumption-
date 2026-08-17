@@ -34,4 +34,10 @@ interface ArtDao {
 
     @Query("SELECT DISTINCT handle FROM art_posts ORDER BY handle")
     fun getAccounts(): Flow<List<String>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(posts: List<ArtPost>)
+
+    @Query("DELETE FROM art_posts WHERE shortcode = :shortcode")
+    suspend fun deletePost(shortcode: String)
 }

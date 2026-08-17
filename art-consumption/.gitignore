@@ -1,0 +1,18 @@
+firebase-service-account.json
+*.json.bak
+.DS_Store
+
+# Scraped content (6.5 GB)
+scraper/content/
+scraper/__pycache__/
+scraper/venv/
+
+# Android build artifacts
+android/.gradle/
+android/app/build/
+android/local.properties
+*.apk
+
+# IDE
+.idea/
+*.iml

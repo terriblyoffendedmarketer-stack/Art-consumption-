@@ -2,6 +2,7 @@ package com.artconsumption.ui
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,12 +28,15 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,14 +49,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.artconsumption.data.ArtDatabase
 import com.artconsumption.data.ArtPost
 import com.artconsumption.data.ContentScanner
+import com.artconsumption.data.FirebaseSync
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 
 class CarouselActivity : ComponentActivity() {
 
@@ -88,41 +92,47 @@ class CarouselActivity : ComponentActivity() {
 @Composable
 fun ArtCarouselScreen(targetShortcode: String?) {
     val context = LocalContext.current
-    var post by remember { mutableStateOf<ArtPost?>(null) }
-    var slides by remember { mutableStateOf<List<File>>(emptyList()) }
     var allPosts by remember { mutableStateOf<List<ArtPost>>(emptyList()) }
-    var currentIndex by remember { mutableStateOf(0) }
+    var currentIndex by remember { mutableIntStateOf(0) }
+    var loading by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             val dao = ArtDatabase.get(context).artDao()
+            val sync = FirebaseSync(context)
 
-            ContentScanner(context).scan()
+            if (dao.getPostCount() == 0) {
+                sync.sync()
+            }
 
             val posts = dao.getAllPostsOnce()
             allPosts = posts
 
-            val target = if (targetShortcode != null) {
-                posts.indexOfFirst { it.shortcode == targetShortcode }.takeIf { it >= 0 } ?: 0
-            } else {
-                0
+            if (targetShortcode != null) {
+                val idx = posts.indexOfFirst { it.shortcode == targetShortcode }
+                if (idx >= 0) currentIndex = idx
             }
-            currentIndex = target
-
-            if (posts.isNotEmpty()) {
-                post = posts[target]
-                slides = ContentScanner.getSlidesForPost(posts[target])
-            }
+            loading = false
         }
     }
 
-    if (post == null || slides.isEmpty()) {
+    if (loading) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = Color.White)
+        }
+        return
+    }
+
+    if (allPosts.isEmpty()) {
         Box(
             modifier = Modifier.fillMaxSize().background(Color.Black),
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Copy art content to\nArtConsumption/content/\non your device",
+                text = "No art content available.\nCheck your internet connection.",
                 color = Color.Gray,
                 textAlign = TextAlign.Center,
                 fontSize = 16.sp
@@ -131,36 +141,59 @@ fun ArtCarouselScreen(targetShortcode: String?) {
         return
     }
 
+    val post = allPosts[currentIndex]
+    val slideModels = remember(currentIndex) { getSlideModels(post) }
+
+    if (slideModels.isEmpty()) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("No slides for this post", color = Color.Gray)
+        }
+        return
+    }
+
     PostCarousel(
-        post = post!!,
-        slides = slides,
+        post = post,
+        slideModels = slideModels,
+        postIndex = currentIndex,
+        postCount = allPosts.size,
         onNextPost = {
             if (allPosts.isNotEmpty()) {
                 currentIndex = (currentIndex + 1) % allPosts.size
-                post = allPosts[currentIndex]
-                slides = ContentScanner.getSlidesForPost(allPosts[currentIndex])
             }
         },
         onPrevPost = {
             if (allPosts.isNotEmpty()) {
                 currentIndex = if (currentIndex > 0) currentIndex - 1 else allPosts.size - 1
-                post = allPosts[currentIndex]
-                slides = ContentScanner.getSlidesForPost(allPosts[currentIndex])
             }
         }
     )
+}
+
+private fun getSlideModels(post: ArtPost): List<Any> {
+    val urls = FirebaseSync.getSlideUrls(post)
+    if (urls.isNotEmpty()) return urls
+    return ContentScanner.getSlidesForPost(post)
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PostCarousel(
     post: ArtPost,
-    slides: List<File>,
+    slideModels: List<Any>,
+    postIndex: Int,
+    postCount: Int,
     onNextPost: () -> Unit,
     onPrevPost: () -> Unit,
 ) {
     var showCaption by remember { mutableStateOf(false) }
-    val pagerState = rememberPagerState(pageCount = { slides.size })
+    val pagerState = rememberPagerState(pageCount = { slideModels.size })
+
+    LaunchedEffect(post.shortcode) {
+        pagerState.scrollToPage(0)
+    }
 
     Box(
         modifier = Modifier
@@ -180,26 +213,37 @@ fun PostCarousel(
                     ) { showCaption = !showCaption },
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
+                SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(slides[page])
+                        .data(slideModels[page])
                         .crossfade(true)
                         .build(),
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit
+                    contentScale = ContentScale.Fit,
+                    loading = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
+                        }
+                    },
+                    error = {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Could not load image", color = Color.Gray, fontSize = 14.sp)
+                        }
+                    }
                 )
             }
         }
 
-        if (slides.size > 1) {
+        // Slide dots
+        if (slideModels.size > 1) {
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 32.dp),
                 horizontalArrangement = Arrangement.Center
             ) {
-                repeat(slides.size) { index ->
+                repeat(slideModels.size) { index ->
                     Box(
                         modifier = Modifier
                             .size(6.dp)
@@ -209,11 +253,12 @@ fun PostCarousel(
                                 else Color.White.copy(alpha = 0.4f)
                             )
                     )
-                    if (index < slides.size - 1) Spacer(Modifier.width(4.dp))
+                    if (index < slideModels.size - 1) Spacer(Modifier.width(4.dp))
                 }
             }
         }
 
+        // Caption overlay
         AnimatedVisibility(
             visible = showCaption,
             enter = fadeIn(),
@@ -243,25 +288,77 @@ fun PostCarousel(
             }
         }
 
+        // Top bar: handle, IG link, slide counter
+        val context = LocalContext.current
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .padding(top = 16.dp, start = 16.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = "@${post.handle}",
                 color = Color.White.copy(alpha = 0.5f),
                 fontSize = 12.sp
             )
-            if (slides.size > 1) {
+            Text(
+                text = "View on IG",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+                    .clickable {
+                        val url = "https://www.instagram.com/p/${post.shortcode}/"
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+            if (slideModels.size > 1) {
                 Text(
-                    text = "${pagerState.currentPage + 1}/${slides.size}",
+                    text = "${pagerState.currentPage + 1}/${slideModels.size}",
                     color = Color.White.copy(alpha = 0.5f),
                     fontSize = 12.sp
                 )
             }
+        }
+
+        // Post navigation: prev / next buttons at bottom
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(bottom = 70.dp, start = 24.dp, end = 24.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = "◀  Prev",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+                    .clickable { onPrevPost() }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            )
+            Text(
+                text = "${postIndex + 1} / $postCount",
+                color = Color.White.copy(alpha = 0.4f),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+            Text(
+                text = "Next  ▶",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(alpha = 0.1f))
+                    .clickable { onNextPost() }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            )
         }
     }
 }

@@ -3,6 +3,5 @@
     "explainingpaintings"
   ],
   "content_dir": "content",
-  "username": "",
-  "session_file": ""
+  "cookies_browser": "chrome"
 }

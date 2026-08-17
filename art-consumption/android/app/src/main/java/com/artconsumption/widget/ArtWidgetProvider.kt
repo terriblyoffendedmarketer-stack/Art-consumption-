@@ -6,17 +6,15 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.widget.RemoteViews
 import com.artconsumption.R
 import com.artconsumption.data.ArtDatabase
-import com.artconsumption.data.ContentScanner
+import com.artconsumption.data.FirebaseSync
 import com.artconsumption.ui.CarouselActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import java.io.File
 
 class ArtWidgetProvider : AppWidgetProvider() {
 
@@ -53,28 +51,35 @@ class ArtWidgetProvider : AppWidgetProvider() {
     ) {
         scope.launch {
             val dao = ArtDatabase.get(context).artDao()
+            val sync = FirebaseSync(context)
 
             if (dao.getPostCount() == 0) {
-                ContentScanner(context).scan()
+                sync.sync()
             }
 
             val post = dao.getLeastRecentlyShown() ?: return@launch
 
             dao.markShown(post.shortcode, System.currentTimeMillis())
 
-            val slides = ContentScanner.getSlidesForPost(post)
-            val hookSlide = slides.firstOrNull() ?: return@launch
-
             val views = RemoteViews(context.packageName, R.layout.widget_art)
 
-            val bitmap = decodeSampledBitmap(hookSlide, 800, 800)
+            val bitmap = sync.downloadFirstSlideAsBitmap(post)
             if (bitmap != null) {
                 views.setImageViewBitmap(R.id.widget_image, bitmap)
             }
 
-            views.setTextViewText(R.id.widget_account, "@${post.handle}")
+            val captionLines = post.caption.lines()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() && !it.startsWith("http") }
+
+            val title = captionLines.getOrNull(0) ?: ""
+            val artist = captionLines.getOrNull(1) ?: "@${post.handle}"
+
+            views.setTextViewText(R.id.widget_title, title)
+            views.setTextViewText(R.id.widget_subtitle, artist)
+
             if (post.slideCount > 1) {
-                views.setTextViewText(R.id.widget_slide_count, "1/${post.slideCount}")
+                views.setTextViewText(R.id.widget_slide_count, "${post.slideCount} slides")
             } else {
                 views.setTextViewText(R.id.widget_slide_count, "")
             }
@@ -88,34 +93,6 @@ class ArtWidgetProvider : AppWidgetProvider() {
 
             manager.updateAppWidget(widgetId, views)
         }
-    }
-
-    private fun decodeSampledBitmap(file: File, reqWidth: Int, reqHeight: Int): android.graphics.Bitmap? {
-        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, options)
-
-        options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)
-        options.inJustDecodeBounds = false
-
-        return BitmapFactory.decodeFile(file.absolutePath, options)
-    }
-
-    private fun calculateInSampleSize(
-        options: BitmapFactory.Options,
-        reqWidth: Int,
-        reqHeight: Int
-    ): Int {
-        val (height, width) = options.outHeight to options.outWidth
-        var inSampleSize = 1
-
-        if (height > reqHeight || width > reqWidth) {
-            val halfHeight = height / 2
-            val halfWidth = width / 2
-            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-                inSampleSize *= 2
-            }
-        }
-        return inSampleSize
     }
 
     companion object {

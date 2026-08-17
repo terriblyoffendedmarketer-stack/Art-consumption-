@@ -12,4 +12,5 @@ data class ArtPost(
     val slideCount: Int,
     val directoryPath: String,
     val lastShownAt: Long = 0,
+    val slideBlobs: String = "",
 )

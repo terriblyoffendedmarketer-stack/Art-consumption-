@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [ArtPost::class], version = 1)
+@Database(entities = [ArtPost::class], version = 2)
 abstract class ArtDatabase : RoomDatabase() {
     abstract fun artDao(): ArtDao
 
@@ -19,7 +19,8 @@ abstract class ArtDatabase : RoomDatabase() {
                     context.applicationContext,
                     ArtDatabase::class.java,
                     "art_consumption.db"
-                ).build().also { instance = it }
+                ).fallbackToDestructiveMigration()
+                .build().also { instance = it }
             }
         }
     }
