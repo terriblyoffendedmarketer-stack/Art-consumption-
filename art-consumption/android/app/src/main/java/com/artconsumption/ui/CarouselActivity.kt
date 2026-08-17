@@ -83,7 +83,7 @@ class CarouselActivity : ComponentActivity() {
         fun intent(context: Context, shortcode: String): Intent {
             return Intent(context, CarouselActivity::class.java).apply {
                 putExtra(EXTRA_SHORTCODE, shortcode)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
             }
         }
     }
