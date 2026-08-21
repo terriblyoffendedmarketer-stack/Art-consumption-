@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
 """
-Removes promotional last slides from posts.
+Removes promotional slides from the Firebase manifest.
 
-Uses perceptual hashing to detect duplicate last slides across posts.
-Any last slide that appears in 3+ posts (visually similar) is a promo page
-and gets removed from the manifest. Does NOT delete image files from Firebase
-(they just won't be referenced anymore).
+Detects promo slides by finding images reused across multiple posts —
+real art is unique per post, promo/follow pages are shared. Strips ALL
+trailing promo slides in one pass, and removes posts that are entirely promo.
 
 Usage: python remove_promo_slides.py [--dry-run]
 Requires: Pillow, google-cloud-storage
           GOOGLE_APPLICATION_CREDENTIALS env var set
 
 Gotchas:
-- Uses perceptual hash with hamming distance <= 10 to catch re-encoded variants
-- Only removes the LAST slide of a post — never interior slides
-- Posts with only 1-2 slides are never touched (too risky)
-- Threshold of 3+ duplicates prevents false positives on actual art
+- Uses manifest slide order, not filesystem sort order.
+- Builds a global map of every slide image's MD5 across all posts.
+  Any image appearing in 2+ posts is promo (real art is never reused).
+- Perceptual hashing catches re-encoded variants (hamming <= 10).
+- Strips ALL trailing promos, not just the last one.
+- Posts left with 0 slides after stripping are removed entirely.
 """
 
 import json
 import sys
+import hashlib
 from pathlib import Path
 from collections import defaultdict
 from PIL import Image
 from google.cloud import storage
 
 BUCKET_NAME = "art-consumption.firebasestorage.app"
-SIMILARITY_THRESHOLD = 10  # hamming distance
-MIN_GROUP_SIZE = 3  # minimum duplicates to consider it promotional
-MIN_SLIDES_TO_TOUCH = 3  # don't remove from posts with fewer slides
+SIMILARITY_THRESHOLD = 10
 
 
 def perceptual_hash(img_path, size=16):
@@ -38,8 +38,7 @@ def perceptual_hash(img_path, size=16):
         avg = sum(pixels) / len(pixels)
         bits = "".join("1" if p > avg else "0" for p in pixels)
         return int(bits, 2)
-    except Exception as e:
-        print(f"  Warning: could not hash {img_path}: {e}")
+    except:
         return None
 
 
@@ -47,112 +46,99 @@ def hamming_distance(h1, h2):
     return bin(h1 ^ h2).count("1")
 
 
-def find_promo_slides(content_dir, handle):
-    account_dir = content_dir / handle
-    post_dirs = sorted([
-        d for d in account_dir.iterdir()
-        if d.is_dir() and (d / "metadata.json").exists()
-    ])
+def main():
+    dry_run = "--dry-run" in sys.argv
+    content_dir = Path("content/explainingpaintings")
 
-    last_slides = []
-    for post_dir in post_dirs:
-        slides = sorted([
-            f for f in post_dir.iterdir()
-            if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
-        ])
-        if len(slides) < MIN_SLIDES_TO_TOUCH:
-            continue
-        last = slides[-1]
-        phash = perceptual_hash(last)
-        if phash is not None:
-            last_slides.append((phash, post_dir.name, last.name, len(slides)))
-
-    # Group by visual similarity
-    groups = []
-    assigned = set()
-    for i, (h1, sc1, name1, total1) in enumerate(last_slides):
-        if i in assigned:
-            continue
-        group = [(sc1, name1, total1)]
-        assigned.add(i)
-        for j, (h2, sc2, name2, total2) in enumerate(last_slides):
-            if j in assigned:
-                continue
-            if hamming_distance(h1, h2) <= SIMILARITY_THRESHOLD:
-                group.append((sc2, name2, total2))
-                assigned.add(j)
-        if len(group) >= MIN_GROUP_SIZE:
-            groups.append(group)
-
-    # Collect shortcodes that have promo last slides
-    promo_posts = {}
-    for group in groups:
-        for shortcode, slide_name, total in group:
-            promo_posts[shortcode] = slide_name
-
-    return promo_posts, groups
-
-
-def update_manifest(handle, promo_posts, dry_run=False):
     client = storage.Client()
     bucket = client.bucket(BUCKET_NAME)
 
-    blob = bucket.blob(f"content/{handle}/manifest.json")
+    print("Downloading current manifest...")
+    blob = bucket.blob("content/explainingpaintings/manifest.json")
     manifest = json.loads(blob.download_as_text())
+    print(f"  {len(manifest)} posts")
 
-    removed = 0
+    print("\nBuilding global slide fingerprint map...")
+    # Hash every slide across all posts
+    slide_md5_count = defaultdict(int)
+    slide_phash_map = {}
+
     for post in manifest:
-        sc = post["shortcode"]
-        if sc not in promo_posts:
+        for slide_blob in post["slides"]:
+            fname = slide_blob.split("/")[-1]
+            local = content_dir / post["shortcode"] / fname
+            if not local.exists():
+                continue
+            md5 = hashlib.md5(local.read_bytes()).hexdigest()
+            slide_md5_count[md5] += 1
+            if md5 not in slide_phash_map:
+                slide_phash_map[md5] = perceptual_hash(local)
+
+    # Build set of promo MD5s (images appearing in 2+ posts)
+    promo_md5s = {md5 for md5, count in slide_md5_count.items() if count >= 2}
+
+    # Extend with perceptual matches
+    promo_phashes = [(md5, slide_phash_map[md5]) for md5 in promo_md5s if slide_phash_map.get(md5) is not None]
+    for md5, ph in slide_phash_map.items():
+        if md5 in promo_md5s or ph is None:
             continue
+        for promo_md5, promo_ph in promo_phashes:
+            if hamming_distance(ph, promo_ph) <= SIMILARITY_THRESHOLD:
+                promo_md5s.add(md5)
+                break
+
+    print(f"  {len(promo_md5s)} unique promo images identified")
+
+    print("\nStripping trailing promo slides...")
+    slides_removed = 0
+    posts_removed = 0
+    posts_trimmed = 0
+    new_manifest = []
+
+    for post in manifest:
         slides = post["slides"]
-        if len(slides) < MIN_SLIDES_TO_TOUCH:
-            continue
-        last_slide_filename = slides[-1].split("/")[-1]
-        promo_filename = promo_posts[sc]
-        # Verify the last slide in the manifest matches what we detected
-        if last_slide_filename == promo_filename:
-            post["slides"] = slides[:-1]
-            post["slide_count"] = len(post["slides"])
-            removed += 1
+        original_count = len(slides)
+
+        # Strip trailing promos
+        while len(slides) >= 1:
+            last_blob = slides[-1]
+            fname = last_blob.split("/")[-1]
+            local = content_dir / post["shortcode"] / fname
+            if not local.exists():
+                break
+            md5 = hashlib.md5(local.read_bytes()).hexdigest()
+            if md5 in promo_md5s:
+                slides = slides[:-1]
+            else:
+                break
+
+        removed = original_count - len(slides)
+        if removed > 0:
+            slides_removed += removed
+            if len(slides) == 0:
+                posts_removed += 1
+                continue
+            else:
+                posts_trimmed += 1
+
+        post["slides"] = slides
+        post["slide_count"] = len(slides)
+        new_manifest.append(post)
+
+    print(f"  {slides_removed} promo slides stripped")
+    print(f"  {posts_trimmed} posts trimmed")
+    print(f"  {posts_removed} all-promo posts removed entirely")
+    print(f"  {len(new_manifest)} posts remaining")
 
     if dry_run:
-        print(f"  Would remove promo slides from {removed} posts (dry run)")
+        print("\nDry run — no changes applied.")
     else:
         blob.upload_from_string(
-            json.dumps(manifest, ensure_ascii=False, indent=2),
+            json.dumps(new_manifest, ensure_ascii=False, indent=2),
             content_type="application/json",
             timeout=60,
         )
-        print(f"  Removed promo slides from {removed} posts")
-
-    return removed
-
-
-def main():
-    dry_run = "--dry-run" in sys.argv
-
-    content_dir = Path("content")
-    handle = "explainingpaintings"
-
-    print("Scanning for promotional last slides...")
-    promo_posts, groups = find_promo_slides(content_dir, handle)
-
-    print(f"\nFound {len(groups)} promo variations across {len(promo_posts)} posts:")
-    for i, group in enumerate(sorted(groups, key=len, reverse=True)):
-        print(f"  Variation {i + 1}: {len(group)} posts")
-
-    if not promo_posts:
-        print("No promotional slides detected.")
-        return
-
-    print(f"\nUpdating Firebase manifest...")
-    removed = update_manifest(handle, promo_posts, dry_run=dry_run)
-
-    if dry_run:
-        print(f"\nDry run complete. Run without --dry-run to apply.")
-    else:
-        print(f"\nDone! {removed} promo slides removed. App will reflect on next sync.")
+        print("\nManifest updated. App will reflect on next sync.")
 
 
 if __name__ == "__main__":

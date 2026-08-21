@@ -92,9 +92,18 @@ class CarouselActivity : ComponentActivity() {
 @Composable
 fun ArtCarouselScreen(targetShortcode: String?) {
     val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("carousel", Context.MODE_PRIVATE) }
     var allPosts by remember { mutableStateOf<List<ArtPost>>(emptyList()) }
     var currentIndex by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(currentIndex, allPosts) {
+        if (allPosts.isNotEmpty()) {
+            prefs.edit()
+                .putString("last_shortcode", allPosts[currentIndex].shortcode)
+                .apply()
+        }
+    }
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -108,8 +117,9 @@ fun ArtCarouselScreen(targetShortcode: String?) {
             val posts = dao.getAllPostsOnce()
             allPosts = posts
 
-            if (targetShortcode != null) {
-                val idx = posts.indexOfFirst { it.shortcode == targetShortcode }
+            val codeToFind = targetShortcode ?: prefs.getString("last_shortcode", null)
+            if (codeToFind != null) {
+                val idx = posts.indexOfFirst { it.shortcode == codeToFind }
                 if (idx >= 0) currentIndex = idx
             }
             loading = false
