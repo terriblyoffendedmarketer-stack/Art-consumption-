@@ -55,6 +55,7 @@ import com.artconsumption.data.ArtDatabase
 import com.artconsumption.data.ArtPost
 import com.artconsumption.data.ContentScanner
 import com.artconsumption.data.FirebaseSync
+import com.artconsumption.widget.ArtWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -99,9 +100,12 @@ fun ArtCarouselScreen(targetShortcode: String?) {
 
     LaunchedEffect(currentIndex, allPosts) {
         if (allPosts.isNotEmpty()) {
+            val shortcode = allPosts[currentIndex].shortcode
             prefs.edit()
-                .putString("last_shortcode", allPosts[currentIndex].shortcode)
+                .putString("last_shortcode", shortcode)
+                .putString("widget_shortcode", shortcode)
                 .apply()
+            ArtWidgetProvider.triggerUpdate(context)
         }
     }
 

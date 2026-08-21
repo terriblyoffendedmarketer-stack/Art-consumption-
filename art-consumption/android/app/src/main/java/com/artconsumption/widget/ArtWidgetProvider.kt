@@ -57,7 +57,13 @@ class ArtWidgetProvider : AppWidgetProvider() {
                 sync.sync()
             }
 
-            val post = dao.getLeastRecentlyShown() ?: return@launch
+            val prefs = context.getSharedPreferences("carousel", Context.MODE_PRIVATE)
+            val widgetShortcode = prefs.getString("widget_shortcode", null)
+            val post = if (widgetShortcode != null) {
+                dao.getPost(widgetShortcode) ?: dao.getLeastRecentlyShown()
+            } else {
+                dao.getLeastRecentlyShown()
+            } ?: return@launch
 
             dao.markShown(post.shortcode, System.currentTimeMillis())
 
