@@ -60,6 +60,7 @@ class ArtWidgetProvider : AppWidgetProvider() {
             val prefs = context.getSharedPreferences("carousel", Context.MODE_PRIVATE)
             val widgetShortcode = prefs.getString("widget_shortcode", null)
             val post = if (widgetShortcode != null) {
+                prefs.edit().remove("widget_shortcode").apply()
                 dao.getPost(widgetShortcode) ?: dao.getLeastRecentlyShown()
             } else {
                 dao.getLeastRecentlyShown()
